@@ -1,0 +1,555 @@
+/* ==========================================================================
+   雾林回环 · UI 与大气叠加层
+   全部颜色取自 materials/palette.css。这里只做"贴"在画面上的东西，
+   颜色分级由渲染器和材质负责，不用 CSS filter（全屏 filter 会多一次合成）。
+   ========================================================================== */
+
+:root {
+	--fog: #8e9a92;
+	--ui-text: #c9d1c6;
+	--ui-dim: #7b877f;
+	--ui-accent: #9fb8a6;
+	--tension: 0;
+	--phase: 0;
+	--font-ui: "Helvetica Neue", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+	--font-title: "Songti SC", "SimSun", "Noto Serif SC", Georgia, serif;
+}
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html,
+body {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	background: #0c0f0d;
+	color: var(--ui-text);
+	font-family: var(--font-ui);
+	-webkit-font-smoothing: antialiased;
+	cursor: default;
+}
+
+#gl {
+	position: fixed;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	display: block;
+	z-index: 0;
+	background: #0c0f0d;
+}
+
+.overlay {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+}
+
+/* ---- 色调：极淡的一层冷绿，把整体压向"潮湿的阴天" ---- */
+#tint {
+	z-index: 1;
+	background: radial-gradient(ellipse 120% 90% at 50% 45%, rgba(120, 142, 128, 0.05), rgba(10, 18, 14, 0.22));
+	mix-blend-mode: multiply;
+}
+
+/* ---- 胶片颗粒：SVG feTurbulence 平铺 + 步进位移动画 ---- */
+#grain {
+	z-index: 2;
+	opacity: 0.16;
+	mix-blend-mode: overlay;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+	background-size: 200px 200px;
+	animation: grainShift 0.7s steps(5) infinite;
+}
+
+@keyframes grainShift {
+	0% { background-position: 0 0; }
+	20% { background-position: -38px 24px; }
+	40% { background-position: 26px -42px; }
+	60% { background-position: -54px -12px; }
+	80% { background-position: 44px 36px; }
+	100% { background-position: 0 0; }
+}
+
+/* ---- 暗角 ---- */
+#vignette {
+	z-index: 3;
+	background: radial-gradient(
+		ellipse 78% 70% at 50% 50%,
+		rgba(0, 0, 0, 0) 36%,
+		rgba(0, 0, 0, 0.42) 68%,
+		rgba(0, 0, 0, 0.88) 100%
+	);
+}
+
+/* ---- 张力脉冲：张力越高，四周越暗、越有"隧道视野" ---- */
+#pulse {
+	z-index: 4;
+	box-shadow: inset 0 0 180px 40px rgba(0, 0, 0, 0.95);
+	opacity: calc(var(--tension) * 0.85);
+	transition: opacity 0.5s linear;
+}
+
+#flash {
+	z-index: 5;
+	background: #000;
+	opacity: 0;
+}
+
+#fade {
+	z-index: 6;
+	background: #000;
+	opacity: 0;
+}
+
+#crosshair {
+	position: fixed;
+	left: 50%;
+	top: 50%;
+	width: 3px;
+	height: 3px;
+	margin: -1.5px 0 0 -1.5px;
+	border-radius: 50%;
+	background: rgba(201, 209, 198, 0.16);
+	z-index: 7;
+	pointer-events: none;
+}
+
+/* ---- HUD ---- */
+#hud-top {
+	position: fixed;
+	inset: 0 0 auto 0;
+	padding: 26px 30px;
+	z-index: 8;
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	pointer-events: none;
+	font-size: 13px;
+	letter-spacing: 0.14em;
+	color: var(--ui-dim);
+	text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+
+#objective {
+	font-family: var(--font-title);
+	font-size: 15px;
+	letter-spacing: 0.3em;
+	color: var(--ui-text);
+	opacity: 0.62;
+}
+
+#stats {
+	display: flex;
+	gap: 22px;
+	font-variant-numeric: tabular-nums;
+}
+
+#stat-dist {
+	color: var(--ui-text);
+	opacity: 0.55;
+}
+
+#stat-breath {
+	color: var(--ui-accent);
+	opacity: calc(0.35 + var(--tension) * 0.65);
+	min-width: 5em;
+	text-align: right;
+	transition: opacity 0.5s linear;
+}
+
+#subtitle {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 12%;
+	z-index: 8;
+	text-align: center;
+	font-family: var(--font-title);
+	font-size: 19px;
+	letter-spacing: 0.22em;
+	color: #d5ddd2;
+	text-shadow: 0 2px 14px rgba(0, 0, 0, 0.95);
+	opacity: 0;
+	transition: opacity 1.1s ease;
+	pointer-events: none;
+}
+
+#subtitle.show {
+	opacity: 0.92;
+}
+
+/* ---- 面板 ---- */
+.panel {
+	position: fixed;
+	inset: 0;
+	z-index: 10;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	align-items: center;
+	gap: 18px;
+	text-align: center;
+	background: radial-gradient(ellipse at center, rgba(8, 12, 10, 0.9), rgba(4, 6, 5, 0.985));
+	backdrop-filter: blur(2px);
+	padding: 40px;
+}
+
+.panel.hidden {
+	display: none;
+}
+
+/* 通用隐藏。原本只有 .panel.hidden 这一条，
+   而姿态指示（#stat-stance）是个 span，不是 panel —— 不加这条它藏不住。 */
+.hidden {
+	display: none;
+}
+
+/* ── 方位刻度 ──────────────────────────────────────────────────
+   一个挂在屏幕中心、半径 132px 的隐形环，环顶有一个小三角。
+   整环随 --bearing 旋转，所以三角就被"甩"到家的方向去了。
+
+   【为什么这么做而不是画一个指南针】
+   它是一个环，但没有刻度线、没有 N/E/S/W、没有度数 ——
+   因为它要表达的不是"北方在哪"，而是"我有多确定回家的方向"。
+   而"有多确定"由 opacity 表达（由 hud.setBearing 每帧写入）。
+   一个会自己淡到消失的指南针，才是记忆该有的样子。
+
+   132px 是调出来的：再近会压到准星，再远会撞上顶部的状态栏。 */
+#bearing {
+	position: fixed;
+	left: 50%;
+	top: 50%;
+	width: 264px;
+	height: 264px;
+	margin: -132px 0 0 -132px;
+	z-index: 3;
+	pointer-events: none;
+	/* 只有透明度做过渡，transform 不能有 —— 它是每帧写的，
+	   加过渡会让它追不上相机的转动（刻度会"甩"在后面）。 */
+	transition: opacity 0.4s linear;
+	transform: rotate(var(--bearing, 0rad));
+}
+
+#bearing i {
+	position: absolute;
+	left: 50%;
+	top: 0;
+	width: 0;
+	height: 0;
+	margin-left: -8px;
+	border-left: 8px solid transparent;
+	border-right: 8px solid transparent;
+	border-bottom: 13px solid rgba(196, 216, 200, 0.9);
+	filter: drop-shadow(0 0 7px rgba(150, 195, 165, 0.55));
+}
+
+/* ── 到家 ──────────────────────────────────────────────────────
+   比"暂停"面板更亮一点、更暖一点：这是整局里唯一一次
+   画面允许往暖色偏。冷灰了全程，最后一点橙是留给它的。 */
+#win h1 {
+	color: #d8d2c0;
+	text-shadow: 0 0 52px rgba(216, 160, 90, 0.3);
+}
+
+#win .sub {
+	color: #9a8f7a;
+	letter-spacing: 0.24em;
+	font-size: 13px;
+}
+
+/* 帮助面板里的"怎么回家"一栏。它比操作表更重要，
+   所以给它一块独立区域，而不是塞进表格再补几行。 */
+.rules {
+	margin-top: 18px;
+	padding-top: 15px;
+	border-top: 1px solid rgba(120, 135, 122, 0.18);
+	max-width: 430px;
+	text-align: left;
+}
+
+.rules p {
+	font-size: 12.5px;
+	line-height: 1.75;
+	color: #8d9a8f;
+	margin-bottom: 9px;
+}
+
+.rules p b {
+	color: #b9cbb9;
+	font-weight: 500;
+}
+
+/* 姿态指示：默认走不显示，静步/蹲下才亮出来。
+   颜色借用张力变量，让"安静"与整体的呼吸状态是同一个色系。 */
+#stat-stance {
+	color: rgb(
+		calc(150 + 40 * var(--tension, 0)),
+		calc(190 - 30 * var(--tension, 0)),
+		calc(170 - 20 * var(--tension, 0))
+	);
+	letter-spacing: 0.18em;
+}
+
+.panel h1 {
+	font-family: var(--font-title);
+	font-size: 52px;
+	font-weight: 400;
+	letter-spacing: 0.42em;
+	text-indent: 0.42em;
+	color: #cfd8cd;
+	text-shadow: 0 0 42px rgba(120, 150, 130, 0.22);
+}
+
+.panel h2 {
+	font-family: var(--font-title);
+	font-size: 26px;
+	font-weight: 400;
+	letter-spacing: 0.3em;
+	text-indent: 0.3em;
+	color: #c3ccc1;
+}
+
+.panel .sub {
+	font-size: 12px;
+	letter-spacing: 0.62em;
+	text-indent: 0.62em;
+	color: #5d6a62;
+	margin-top: -14px;
+}
+
+.panel .desc {
+	font-size: 15px;
+	line-height: 2;
+	color: #8e9a92;
+	max-width: 30em;
+}
+
+.panel .hint {
+	font-size: 12px;
+	color: #4f5a53;
+	letter-spacing: 0.16em;
+}
+
+.panel button {
+	margin-top: 14px;
+	padding: 13px 44px;
+	font-family: var(--font-ui);
+	font-size: 14px;
+	letter-spacing: 0.3em;
+	text-indent: 0.3em;
+	color: #c9d1c6;
+	background: rgba(140, 165, 150, 0.05);
+	border: 1px solid rgba(140, 165, 150, 0.28);
+	border-radius: 1px;
+	cursor: pointer;
+	transition: background 0.35s, border-color 0.35s, color 0.35s;
+}
+
+.panel button:hover {
+	background: rgba(140, 165, 150, 0.14);
+	border-color: rgba(180, 205, 190, 0.55);
+	color: #e2e8dd;
+}
+
+.panel table {
+	border-collapse: collapse;
+	font-size: 14px;
+	color: #9aa79e;
+}
+
+.panel table td {
+	padding: 7px 20px;
+	text-align: left;
+}
+
+.panel table td:first-child {
+	color: #cfd8cd;
+	font-variant-numeric: tabular-nums;
+	letter-spacing: 0.08em;
+	white-space: nowrap;
+}
+
+.panel .tip {
+	font-family: var(--font-title);
+	font-size: 14px;
+	letter-spacing: 0.2em;
+	color: #6c7a72;
+	margin-top: 10px;
+}
+
+/* ---- 设置块（嵌在 F1 说明页里）---- */
+.help-inner {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 14px;
+	max-height: 100%;
+	overflow-y: auto;
+	padding: 8px 4px;
+	scrollbar-width: thin;
+}
+
+.settings {
+	margin-top: 10px;
+	padding-top: 18px;
+	border-top: 1px solid rgba(140, 165, 150, 0.14);
+	display: flex;
+	flex-direction: column;
+	gap: 9px;
+	width: 330px;
+}
+
+.settings-title {
+	font-size: 11px;
+	letter-spacing: 0.34em;
+	text-indent: 0.34em;
+	color: #55625a;
+	text-align: left;
+	margin-bottom: 3px;
+}
+
+.settings .row {
+	display: grid;
+	grid-template-columns: 84px 1fr 52px;
+	align-items: center;
+	gap: 12px;
+	font-size: 13px;
+	color: #9aa79e;
+	cursor: pointer;
+}
+
+.settings .row .name {
+	text-align: left;
+	letter-spacing: 0.06em;
+}
+
+.settings .row .val {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	color: #6f7c74;
+	font-size: 12px;
+}
+
+/* 滑块：自己画，避免各浏览器默认样式把整个面板的调性拉走 */
+.settings input[type="range"] {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 100%;
+	height: 16px;
+	background: transparent;
+	cursor: pointer;
+}
+
+.settings input[type="range"]::-webkit-slider-runnable-track {
+	height: 2px;
+	background: rgba(140, 165, 150, 0.24);
+	border-radius: 1px;
+}
+
+.settings input[type="range"]::-moz-range-track {
+	height: 2px;
+	background: rgba(140, 165, 150, 0.24);
+	border-radius: 1px;
+}
+
+.settings input[type="range"]::-webkit-slider-thumb {
+	-webkit-appearance: none;
+	appearance: none;
+	width: 9px;
+	height: 9px;
+	margin-top: -3.5px;
+	border-radius: 50%;
+	background: #a9bdae;
+	transition: background 0.25s;
+}
+
+.settings input[type="range"]::-moz-range-thumb {
+	width: 9px;
+	height: 9px;
+	border: none;
+	border-radius: 50%;
+	background: #a9bdae;
+}
+
+.settings input[type="range"]:hover::-webkit-slider-thumb {
+	background: #d3e0d6;
+}
+
+.settings input[type="range"]:hover::-moz-range-thumb {
+	background: #d3e0d6;
+}
+
+.settings input[type="checkbox"] {
+	-webkit-appearance: none;
+	appearance: none;
+	justify-self: end;
+	width: 30px;
+	height: 15px;
+	border-radius: 8px;
+	background: rgba(140, 165, 150, 0.14);
+	border: 1px solid rgba(140, 165, 150, 0.24);
+	position: relative;
+	cursor: pointer;
+	transition: background 0.25s, border-color 0.25s;
+}
+
+.settings input[type="checkbox"]::after {
+	content: "";
+	position: absolute;
+	top: 1.5px;
+	left: 2px;
+	width: 9px;
+	height: 9px;
+	border-radius: 50%;
+	background: #6f7c74;
+	transition: transform 0.25s, background 0.25s;
+}
+
+.settings input[type="checkbox"]:checked {
+	background: rgba(160, 195, 172, 0.3);
+	border-color: rgba(180, 205, 190, 0.5);
+}
+
+.settings input[type="checkbox"]:checked::after {
+	transform: translateX(15px);
+	background: #d3e0d6;
+}
+
+.settings .link {
+	align-self: flex-end;
+	margin: 2px 0 0;
+	padding: 0;
+	background: none;
+	border: none;
+	font-size: 11px;
+	letter-spacing: 0.18em;
+	color: #55625a;
+	cursor: pointer;
+	transition: color 0.25s;
+}
+
+.settings .link:hover {
+	background: none;
+	color: #a9bdae;
+}
+
+/* ---- 故障：唯一允许的"廉价"效果。它是心理性的，所以成立。 ---- */
+#gl.glitch {
+	animation: glitchCut 0.3s steps(2) 1;
+}
+
+@keyframes glitchCut {
+	0% { transform: translate(0, 0); filter: none; }
+	8% { transform: translate(calc(-9px * var(--glitch, 0.5)), 4px) skewX(5deg); filter: invert(1) hue-rotate(72deg) saturate(2.2); }
+	18% { transform: translate(calc(7px * var(--glitch, 0.5)), -6px); filter: invert(1) hue-rotate(-58deg); }
+	30% { transform: translate(calc(-4px * var(--glitch, 0.5)), 7px) skewY(3deg); filter: none; }
+	44% { transform: translate(calc(11px * var(--glitch, 0.5)), 0); filter: invert(1) contrast(2.4); }
+	58% { transform: translate(calc(-6px * var(--glitch, 0.5)), -3px) skewX(-4deg); filter: none; }
+	76% { transform: translate(calc(3px * var(--glitch, 0.5)), 5px); filter: invert(0.7) brightness(1.6); }
+	100% { transform: translate(0, 0); filter: none; }
+}
