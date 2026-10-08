@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>雾林回环 · MISTLOOP</title>
+	<link rel="icon" href="data:," />
+  <script type="module" crossorigin src="./assets/index-BGkxx3Qz.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-Vut8wOqA.css">
+</head>
+<body>
+	<canvas id="gl"></canvas>
+
+	<!-- 大气叠加层。全部 DOM 实现：首帧快、零兼容风险，而且颗粒本来就该"贴"在画面上 -->
+	<div id="tint" class="overlay"></div>
+	<div id="grain" class="overlay"></div>
+	<div id="vignette" class="overlay"></div>
+	<div id="pulse" class="overlay"></div>
+	<div id="flash" class="overlay"></div>
+	<div id="fade" class="overlay"></div>
+
+	<div id="crosshair"></div>
+
+	<!-- 方位刻度。不是仪表，是"记忆的可见形态"—— 透明度就是方向记忆的强度，
+	     会自己淡掉。理由见 hud.setBearing 的注释。 -->
+	<div id="bearing" class="hidden"><i></i></div>
+
+	<div id="hud-top">
+		<div id="objective">找回你的方向</div>
+		<div id="stats">
+			<span id="stat-dist">0.0 m</span>
+			<span id="stat-lap">第 0 圈</span>
+			<span id="stat-stance" class="hidden"></span>
+			<span id="stat-breath">平静</span>
+		</div>
+	</div>
+
+	<div id="subtitle"></div>
+
+	<div id="help" class="panel hidden">
+		<div class="help-inner">
+			<h2>操作</h2>
+			<table>
+				<tr><td>W A S D</td><td>移动</td></tr>
+				<tr><td>Shift</td><td>静步（走得慢，但几乎听不见）</td></tr>
+				<tr><td>Ctrl</td><td>蹲下（最低最慢，身影几乎察觉不到你）</td></tr>
+				<tr><td>W 按住</td><td>走一会儿会自己小跑起来（消耗体力）</td></tr>
+				<tr><td>Space</td><td>跳跃（落地会被听见）</td></tr>
+				<tr><td>鼠标</td><td>转头</td></tr>
+				<tr><td>E</td><td>手电筒（照住它，它就动不了）</td></tr>
+				<tr><td>F</td><td>切换第一 / 第三人称（越肩俯视）</td></tr>
+				<tr><td>Esc</td><td>暂停 / 释放鼠标</td></tr>
+				<tr><td>F1</td><td>显示或隐藏本表</td></tr>
+			</table>
+
+			<div class="rules">
+				<div class="settings-title">怎么回家</div>
+				<p>
+					你只有一个山洞。你在里面住过，所以你**知道**它长什么样 ——
+					但雾把它从你的方向感里拿走了。
+				</p>
+				<p>
+					它拿不走的是：照住它的时候。
+					<b>用手电把那个东西钉住，钉够一会儿，方向会回来。</b>
+					松开之后你会重新忘掉，所以要在忘光之前往那边走。
+				</p>
+				<p>
+					它杀不死。你唯一能对它做的事，就是让它停住 ——
+					而停下就意味着你也在停。
+				</p>
+			</div>
+
+			<!-- 设置。塞在说明页里而不是独立菜单，见 core/settings.js 顶部注释。 -->
+			<div class="settings">
+				<div class="settings-title">视角</div>
+
+				<label class="row" for="set-sens">
+					<span class="name">灵敏度</span>
+					<input id="set-sens" type="range" min="0.0004" max="0.005" step="0.0001" value="0.0012" />
+					<span class="val" id="set-sens-val">0.0012</span>
+				</label>
+
+				<label class="row" for="set-smooth">
+					<span class="name">平滑</span>
+					<input id="set-smooth" type="range" min="0" max="0.7" step="0.01" value="0.35" />
+					<span class="val" id="set-smooth-val">0.35</span>
+				</label>
+
+				<label class="row" for="set-bob">
+					<span class="name">头部摆动</span>
+					<input id="set-bob" type="range" min="0" max="1.6" step="0.05" value="1" />
+					<span class="val" id="set-bob-val">1.00</span>
+				</label>
+
+				<label class="row toggle" for="set-invx">
+					<span class="name">水平反转</span>
+					<input id="set-invx" type="checkbox" />
+					<span class="val"></span>
+				</label>
+
+				<label class="row toggle" for="set-invy">
+					<span class="name">垂直反转</span>
+					<input id="set-invy" type="checkbox" />
+					<span class="val"></span>
+				</label>
+
+				<button id="set-reset" class="link">恢复默认</button>
+			</div>
+
+			<p class="tip">雾只让你看见四十米。你走得越远，越确定自己走过这里。</p>
+		</div>
+	</div>
+
+	<div id="start" class="panel">
+		<h1>雾林回环</h1>
+		<p class="sub">MISTLOOP</p>
+		<p class="desc">
+			你在山里迷了路。雨一直下。<br />
+			你有一个山洞，你知道它长什么样 —— 但你说不出它在哪。
+		</p>
+		<button id="btn-start">进入林子</button>
+		<p class="hint">建议戴耳机。点击画面锁定鼠标。按 F1 看操作。</p>
+	</div>
+
+	<div id="paused" class="panel hidden">
+		<h2>你停下了</h2>
+		<p class="desc">它不喜欢你停下。</p>
+		<button id="btn-resume">继续走</button>
+	</div>
+
+	<div id="win" class="panel hidden">
+		<h1>你到家了</h1>
+		<p class="desc" id="win-text">你回到了自己的洞口。</p>
+		<p class="sub" id="win-stats"></p>
+		<p class="tip">雨还在下。但里面是干的。</p>
+	</div>
+
+</body>
+</html>
